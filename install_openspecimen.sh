@@ -163,7 +163,7 @@ install_required_packages() {
     run_root env DEBIAN_FRONTEND=noninteractive apt-get install -y ca-certificates curl unzip "mysql-server=$mysql_pkg_version" mysql-client
   fi
 
-  installed_version="$(mysql --version 2>/dev/null | sed -E 's/.*Distrib ([0-9.]+).*/\1/')"
+  installed_version="$(mysql --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -n 1)"
   [[ "$installed_version" == 8.0.45* ]] || fail "Installed MySQL version is $installed_version, expected 8.0.45."
 }
 
