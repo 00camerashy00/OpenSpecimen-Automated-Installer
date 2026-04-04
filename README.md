@@ -27,9 +27,18 @@ sudo ./install_openspecimen.sh \
   --mysql-app-password "AppPasswordHere"
 ```
 
+The installer also saves your answers into a local `.env` file next to the script and reloads them automatically on the next run.
+
+To discard the saved inputs and force a full fresh prompt cycle:
+
+```bash
+sudo ./install_openspecimen.sh --reset-env
+```
+
 ## Important Notes
 
 - This is designed for a fresh install on Ubuntu.
+- Saved installer inputs are stored in `.env` with `600` permissions.
 - If MySQL already exists with data, the script stops before wiping `/var/lib/mysql` unless `--force-mysql-reset` is supplied.
 - The script assumes the OpenSpecimen zip contains the usual bundled installer and Tomcat payload.
 - Installer logs are written to `/usr/local/openspecimen_installable/logs`.
