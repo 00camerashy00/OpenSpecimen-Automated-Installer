@@ -3,6 +3,7 @@
 set -euo pipefail
 
 SCRIPT_NAME="$(basename "$0")"
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 TIMESTAMP="$(date +%Y%m%d_%H%M%S)"
 
 INSTALL_ROOT="${INSTALL_ROOT:-/usr/local/openspecimen}"
@@ -29,6 +30,8 @@ CONFIG_ENV_NAME="${CONFIG_ENV_NAME:-config/openspecimen}"
 FORCE_MYSQL_RESET="${FORCE_MYSQL_RESET:-0}"
 STRICT_MYSQL_VERSION="${STRICT_MYSQL_VERSION:-0}"
 NON_INTERACTIVE=0
+RESET_ENV=0
+ENV_FILE="${ENV_FILE:-$SCRIPT_DIR/.env}"
 
 DOWNLOAD_URL="${DOWNLOAD_URL:-}"
 DOWNLOAD_USER="${DOWNLOAD_USER:-}"
@@ -62,6 +65,7 @@ Options:
   --db-port PORT                Database port for Tomcat JDBC URL (default: 3306)
   --archive PATH                Use an existing local zip instead of downloading
   --force-mysql-reset           Allow wiping an existing MySQL data directory
+  --reset-env                   Delete saved .env inputs and prompt again
   --non-interactive             Fail instead of prompting for any missing values
   --strict-mysql-version        Abort if MySQL 8.0.45 is not available from APT
   --help                        Show this help
@@ -88,6 +92,13 @@ fail() {
 
 run() {
   debug "Running: $*"
+  "$@"
+}
+
+run_masked() {
+  local masked_command="$1"
+  shift
+  debug "Running: $masked_command"
   "$@"
 }
 
@@ -168,6 +179,10 @@ parse_args() {
         FORCE_MYSQL_RESET=1
         shift
         ;;
+      --reset-env)
+        RESET_ENV=1
+        shift
+        ;;
       --non-interactive)
         NON_INTERACTIVE=1
         shift
@@ -185,6 +200,45 @@ parse_args() {
         ;;
     esac
   done
+}
+
+load_saved_env() {
+  if [[ "$RESET_ENV" -eq 1 && -f "$ENV_FILE" ]]; then
+    rm -f "$ENV_FILE"
+    info "Removed saved installer inputs: $ENV_FILE"
+  fi
+
+  if [[ -f "$ENV_FILE" ]]; then
+    info "Loading saved installer inputs from $ENV_FILE"
+    # shellcheck disable=SC1090
+    source "$ENV_FILE"
+  fi
+}
+
+save_env_file() {
+  local tmp_file
+  tmp_file="$(mktemp)"
+
+  {
+    printf '# OpenSpecimen installer inputs\n'
+    printf '# Generated on %s\n' "$(date +'%Y-%m-%d %H:%M:%S')"
+    printf 'DOWNLOAD_URL=%q\n' "$DOWNLOAD_URL"
+    printf 'DOWNLOAD_USER=%q\n' "$DOWNLOAD_USER"
+    printf 'DOWNLOAD_PASSWORD=%q\n' "$DOWNLOAD_PASSWORD"
+    printf 'OS_ENV=%q\n' "$OS_ENV"
+    printf 'MYSQL_ROOT_PASSWORD=%q\n' "$MYSQL_ROOT_PASSWORD"
+    printf 'MYSQL_APP_PASSWORD=%q\n' "$MYSQL_APP_PASSWORD"
+    printf 'MYSQL_APP_USER=%q\n' "$MYSQL_APP_USER"
+    printf 'DB_NAME=%q\n' "$DB_NAME"
+    printf 'APP_NAME=%q\n' "$APP_NAME"
+    printf 'DB_HOST=%q\n' "$DB_HOST"
+    printf 'DB_PORT=%q\n' "$DB_PORT"
+  } > "$tmp_file"
+
+  chmod 600 "$tmp_file"
+  mv "$tmp_file" "$ENV_FILE"
+  chmod 600 "$ENV_FILE"
+  info "Saved installer inputs to $ENV_FILE"
 }
 
 prompt_value() {
@@ -230,7 +284,7 @@ ensure_download_inputs() {
 }
 
 collect_inputs() {
-  if [[ ! -f "$ARCHIVE_PATH" ]]; then
+  if [[ ! -f "$ARCHIVE_PATH" || "$RESET_ENV" -eq 1 ]]; then
     ensure_download_inputs
   fi
   prompt_value "OS_ENV" "Environment (DEV, TEST, PROD)"
@@ -549,7 +603,9 @@ download_openspecimen() {
   ensure_download_inputs
 
   info "Downloading OpenSpecimen archive to $ARCHIVE_PATH"
-  run curl --fail --show-error --location -u "${DOWNLOAD_USER}:${DOWNLOAD_PASSWORD}" "$DOWNLOAD_URL" -o "$ARCHIVE_PATH"
+  run_masked \
+    "curl --fail --show-error --location -u ${DOWNLOAD_USER}:******** \"$DOWNLOAD_URL\" -o \"$ARCHIVE_PATH\"" \
+    curl --fail --show-error --location -u "${DOWNLOAD_USER}:${DOWNLOAD_PASSWORD}" "$DOWNLOAD_URL" -o "$ARCHIVE_PATH"
 
   if ! validate_zip_archive "$ARCHIVE_PATH"; then
     describe_invalid_archive "$ARCHIVE_PATH"
@@ -590,9 +646,37 @@ find_first() {
   find "$search_root" "$@" -print 2>/dev/null | head -n 1 || true
 }
 
+is_tomcat_home_dir() {
+  local dir_path="$1"
+  [[ -d "$dir_path" && -d "$dir_path/bin" && -d "$dir_path/conf" ]]
+}
+
+detect_tomcat_root() {
+  local search_root="$1"
+  local named_dir
+
+  named_dir="$(find_first "$search_root" -type d \( -name 'apache-tomcat*' -o -name 'tomcat-as' \))"
+  if [[ -n "$named_dir" ]]; then
+    printf '%s' "$named_dir"
+    return 0
+  fi
+
+  if is_tomcat_home_dir "$search_root"; then
+    printf '%s' "$search_root"
+    return 0
+  fi
+
+  find "$search_root" -type d 2>/dev/null | while read -r dir_path; do
+    if is_tomcat_home_dir "$dir_path"; then
+      printf '%s\n' "$dir_path"
+      break
+    fi
+  done
+}
+
 detect_bundle_layout() {
   INSTALLER_SCRIPT="$(find_first "$EXTRACT_DIR" -type f -name install.sh)"
-  BUNDLED_TOMCAT_SOURCE="$(find_first "$EXTRACT_DIR" -type d -name 'apache-tomcat*')"
+  BUNDLED_TOMCAT_SOURCE="$(detect_tomcat_root "$EXTRACT_DIR")"
 
   if [[ -z "$INSTALLER_SCRIPT" ]]; then
     fail "Could not find install.sh in the extracted OpenSpecimen bundle."
@@ -600,7 +684,7 @@ detect_bundle_layout() {
 
   if [[ -z "$BUNDLED_TOMCAT_SOURCE" ]]; then
     local tomcat_archive
-    tomcat_archive="$(find "$EXTRACT_DIR" -type f \( -name 'apache-tomcat*.zip' -o -name 'apache-tomcat*.tar.gz' -o -name 'apache-tomcat*.tgz' \) -print 2>/dev/null | head -n 1 || true)"
+    tomcat_archive="$(find "$EXTRACT_DIR" -type f \( -name 'apache-tomcat*.zip' -o -name 'apache-tomcat*.tar.gz' -o -name 'apache-tomcat*.tgz' -o -name 'tomcat-as.zip' -o -name 'tomcat-as.tar.gz' -o -name 'tomcat-as.tgz' \) -print 2>/dev/null | head -n 1 || true)"
     if [[ -n "$tomcat_archive" ]]; then
       local temp_tomcat_extract
       temp_tomcat_extract="$(mktemp -d)"
@@ -612,11 +696,11 @@ detect_bundle_layout() {
           run tar -xzf "$tomcat_archive" -C "$temp_tomcat_extract"
           ;;
       esac
-      BUNDLED_TOMCAT_SOURCE="$(find_first "$temp_tomcat_extract" -type d -name 'apache-tomcat*')"
+      BUNDLED_TOMCAT_SOURCE="$(detect_tomcat_root "$temp_tomcat_extract")"
     fi
   fi
 
-  [[ -n "$BUNDLED_TOMCAT_SOURCE" ]] || fail "Could not find a bundled Tomcat directory or Tomcat archive in the OpenSpecimen zip."
+  [[ -n "$BUNDLED_TOMCAT_SOURCE" ]] || fail "Could not find a bundled Tomcat directory or Tomcat archive in the OpenSpecimen zip. Expected names like tomcat-as.zip, tomcat-as, or apache-tomcat*."
 }
 
 install_tomcat_bundle() {
@@ -626,8 +710,8 @@ install_tomcat_bundle() {
     warn "Existing Tomcat directory moved to ${TOMCAT_DIR}.bak.${TIMESTAMP}"
   fi
 
-  mkdir -p "$(dirname "$TOMCAT_DIR")"
-  cp -a "$BUNDLED_TOMCAT_SOURCE" "$TOMCAT_DIR"
+  mkdir -p "$TOMCAT_DIR"
+  cp -a "$BUNDLED_TOMCAT_SOURCE"/. "$TOMCAT_DIR"/
   mkdir -p "$TOMCAT_DIR/conf" "$TOMCAT_DIR/bin" "$TOMCAT_DIR/temp"
   chmod +x "$TOMCAT_DIR"/bin/*.sh 2>/dev/null || true
 }
@@ -767,7 +851,10 @@ main() {
   ensure_root
   parse_args "$@"
   setup_logging
+  load_saved_env
+  parse_args "$@"
   collect_inputs
+  save_env_file
   prepare_directories
   apt_install_common_packages
   download_openspecimen
