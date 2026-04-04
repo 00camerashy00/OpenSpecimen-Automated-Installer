@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-set -euo pipefail
+set -Eeuo pipefail
 
 SCRIPT_NAME="$(basename "$0")"
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
@@ -122,6 +122,14 @@ trap_handler() {
   fi
 }
 
+err_handler() {
+  local exit_code="$?"
+  local line_no="$1"
+  error "Command failed at line ${line_no} with exit code ${exit_code}."
+  return "$exit_code"
+}
+
+trap 'err_handler $LINENO' ERR
 trap trap_handler EXIT
 
 parse_args() {
@@ -718,12 +726,14 @@ install_tomcat_bundle() {
 
 install_java17() {
   local java_home
+  local tmp_setenv
 
   java_home="$(dirname "$(dirname "$(readlink -f "$(command -v javac)")")")"
   info "Configuring Tomcat for Java 17 using JAVA_HOME=$java_home"
 
   backup_file "$TOMCAT_DIR/bin/setenv.sh"
-  cat > "$TOMCAT_DIR/bin/setenv.sh" <<EOF
+  tmp_setenv="$(mktemp)"
+  cat > "$tmp_setenv" <<EOF
 #!/usr/bin/env bash
 export JAVA_HOME="$java_home"
 export JAVA_OPTS="-Dfile.encoding=UTF-8 -Xms28m -Xmx2048m"
@@ -731,7 +741,8 @@ export CATALINA_OPTS="\${CATALINA_OPTS:-} -XX:+HeapDumpOnOutOfMemoryError -XX:He
 export JDK_JAVA_OPTIONS="\${JDK_JAVA_OPTIONS:-} --add-opens=java.base/java.net=ALL-UNNAMED"
 export CATALINA_PID="$TOMCAT_DIR/temp/catalina.pid"
 EOF
-  chmod 755 "$TOMCAT_DIR/bin/setenv.sh"
+  chmod 755 "$tmp_setenv"
+  mv "$tmp_setenv" "$TOMCAT_DIR/bin/setenv.sh"
 }
 
 detect_mysql_driver_class() {
