@@ -223,11 +223,15 @@ prompt_value() {
   printf -v "$var_name" '%s' "$current_value"
 }
 
+ensure_download_inputs() {
+  prompt_value "DOWNLOAD_URL" "Download URL"
+  prompt_value "DOWNLOAD_USER" "Download username"
+  prompt_value "DOWNLOAD_PASSWORD" "Download password" 1
+}
+
 collect_inputs() {
   if [[ ! -f "$ARCHIVE_PATH" ]]; then
-    prompt_value "DOWNLOAD_URL" "Download URL"
-    prompt_value "DOWNLOAD_USER" "Download username"
-    prompt_value "DOWNLOAD_PASSWORD" "Download password" 1
+    ensure_download_inputs
   fi
   prompt_value "OS_ENV" "Environment (DEV, TEST, PROD)"
 
@@ -263,6 +267,11 @@ sql_escape() {
   value="${value//\\/\\\\}"
   value="${value//\'/\'\'}"
   printf '%s' "$value"
+}
+
+text_preview() {
+  local file_path="$1"
+  head -c 512 "$file_path" 2>/dev/null | LC_ALL=C tr -cd '\11\12\15\40-\176'
 }
 
 xml_escape() {
@@ -525,20 +534,54 @@ SQL
 }
 
 download_openspecimen() {
-  if [[ -f "$ARCHIVE_PATH" ]]; then
+  if [[ -f "$ARCHIVE_PATH" ]] && validate_zip_archive "$ARCHIVE_PATH"; then
     info "Reusing existing archive: $ARCHIVE_PATH"
     return
   fi
 
+  if [[ -f "$ARCHIVE_PATH" ]]; then
+    warn "Existing archive is not a valid ZIP: $ARCHIVE_PATH"
+    describe_invalid_archive "$ARCHIVE_PATH"
+    mv "$ARCHIVE_PATH" "${ARCHIVE_PATH}.invalid.${TIMESTAMP}"
+    warn "Moved invalid archive to ${ARCHIVE_PATH}.invalid.${TIMESTAMP}"
+  fi
+
+  ensure_download_inputs
+
   info "Downloading OpenSpecimen archive to $ARCHIVE_PATH"
-  run curl -u "${DOWNLOAD_USER}:${DOWNLOAD_PASSWORD}" -L "$DOWNLOAD_URL" -o "$ARCHIVE_PATH"
+  run curl --fail --show-error --location -u "${DOWNLOAD_USER}:${DOWNLOAD_PASSWORD}" "$DOWNLOAD_URL" -o "$ARCHIVE_PATH"
+
+  if ! validate_zip_archive "$ARCHIVE_PATH"; then
+    describe_invalid_archive "$ARCHIVE_PATH"
+    fail "Downloaded file is not a valid ZIP archive. Check the URL, username/password, and whether the link returns the actual OpenSpecimen build instead of an HTML login or error page."
+  fi
 }
 
 extract_archive() {
   info "Extracting archive into $EXTRACT_DIR"
+  validate_zip_archive "$ARCHIVE_PATH" || fail "Archive validation failed for $ARCHIVE_PATH"
   rm -rf "$EXTRACT_DIR"
   mkdir -p "$EXTRACT_DIR"
   run unzip -oq "$ARCHIVE_PATH" -d "$EXTRACT_DIR"
+}
+
+validate_zip_archive() {
+  local file_path="$1"
+  [[ -f "$file_path" ]] || return 1
+  unzip -tq "$file_path" >/dev/null 2>&1
+}
+
+describe_invalid_archive() {
+  local file_path="$1"
+  local preview file_size
+
+  file_size="$(stat -c '%s bytes' "$file_path" 2>/dev/null || printf 'unknown size')"
+  preview="$(text_preview "$file_path")"
+
+  warn "Archive check failed for $file_path ($file_size)"
+  if [[ -n "$preview" ]]; then
+    warn "File preview: ${preview//$'\n'/ }"
+  fi
 }
 
 find_first() {
