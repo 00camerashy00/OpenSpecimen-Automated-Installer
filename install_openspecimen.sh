@@ -144,7 +144,7 @@ fix_installable_permissions() {
 
 # Install exact MySQL 8.0.45 from APT and fail fast if that version is missing.
 install_required_packages() {
-  local installed_state mysql_pkg_version mysql_client_version installed_version
+  local installed_state mysql_pkg_version mysql_client_version mysql_version_line installed_version
 
   installed_state="$(dpkg-query -W -f='${Status}' mysql-server 2>/dev/null || true)"
   if [[ "$installed_state" == *"installed"* ]]; then
@@ -163,7 +163,9 @@ install_required_packages() {
     run_root env DEBIAN_FRONTEND=noninteractive apt-get install -y ca-certificates curl unzip "mysql-server=$mysql_pkg_version" mysql-client
   fi
 
-  installed_version="$(mysql --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -n 1)"
+  mysql_version_line="$(mysql --version 2>/dev/null || true)"
+  installed_version="$(printf '%s\n' "$mysql_version_line" | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -n 1 || true)"
+  [[ -n "$installed_version" ]] || fail "MySQL client was not found after package installation. Check the apt output above for the failing package."
   [[ "$installed_version" == 8.0.45* ]] || fail "Installed MySQL version is $installed_version, expected 8.0.45."
 }
 
