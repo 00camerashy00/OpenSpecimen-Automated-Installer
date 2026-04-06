@@ -240,10 +240,10 @@ configure_mysql_cnf() {
   set_ini_value "$MYSQL_CONF" "mysqld" "innodb_buffer_pool_size" "1536M"
   set_ini_value "$MYSQL_CONF" "mysqld" "log_bin_trust_function_creators" "1"
   set_ini_value "$MYSQL_CONF" "mysqld" "optimizer_search_depth" "0"
-  set_ini_value "$MYSQL_CONF" "mysqld" "character-set-server" "utf8"
-  set_ini_value "$MYSQL_CONF" "mysqld" "init_connect" "SET NAMES utf8 COLLATE utf8_unicode_ci"
-  set_ini_value "$MYSQL_CONF" "mysqld" "collation-server" "utf8_unicode_ci"
-  set_ini_value "$MYSQL_CONF" "client" "default-character-set" "utf8"
+  set_ini_value "$MYSQL_CONF" "mysqld" "character-set-server" "utf8mb4"
+  set_ini_value "$MYSQL_CONF" "mysqld" "init_connect" "SET collation_connection = utf8mb4_unicode_ci"
+  set_ini_value "$MYSQL_CONF" "mysqld" "collation-server" "utf8mb4_unicode_ci"
+  set_ini_value "$MYSQL_CONF" "client" "default-character-set" "utf8mb4"
 }
 
 # Stop and start helpers are tolerant because service naming can vary slightly
