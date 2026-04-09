@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # =============================================================================
 # OpenSpecimen Enterprise Edition — Fresh Install Script
-# Target OS  : Ubuntu 22.04 LTS
-# Stack      : Java 17 + Tomcat 9 (bundled as tomcat-as) + MySQL 8.0
+# Target OS  : Ubuntu 24.04 LTS
+# Stack      : Apache 2.4 + Java 17 + Tomcat 9 (bundled as tomcat-as) + MySQL 8.0
 # Service    : Runs as dedicated user 'openspecimen'
 # Usage      : sudo bash install_openspecimen.sh
 # =============================================================================
@@ -27,6 +27,7 @@ DATA_DIR="${BASE_DIR}/data"
 PLUGINS_DIR="${BASE_DIR}/plugins"
 INSTALLER_DIR="${BASE_DIR}/installer"
 LOG_FILE="/var/log/openspecimen_install.log"
+APACHE_PORT=80
 TOMCAT_PORT=8080
 
 # ─── Redirect all output to log as well ──────────────────────────────────────
@@ -86,7 +87,25 @@ info "Installing required packages..."
 apt-get install -y -qq curl unzip python3
 
 # =============================================================================
-# SECTION 3 — Java 17
+# SECTION 3 — Apache
+# =============================================================================
+
+install_apache() {
+    if systemctl is-active --quiet apache2 2>/dev/null; then
+        success "Apache already running — skipping install."
+    else
+        info "Installing Apache..."
+        apt-get install -y -qq apache2
+        systemctl enable apache2
+        systemctl start apache2
+        success "Apache installed and started."
+    fi
+}
+
+install_apache
+
+# =============================================================================
+# SECTION 4 — Java 17
 # =============================================================================
 
 install_java() {
@@ -112,7 +131,7 @@ EOF
 install_java
 
 # =============================================================================
-# SECTION 4 — MySQL 8.0 + prerequisites
+# SECTION 5 — MySQL 8.0 + prerequisites
 # =============================================================================
 
 install_mysql() {
@@ -157,7 +176,7 @@ EOF
 install_mysql
 
 # =============================================================================
-# SECTION 5 — Create database and user
+# SECTION 6 — Create database and user
 # =============================================================================
 
 setup_database() {
@@ -174,7 +193,7 @@ SQL
 setup_database
 
 # =============================================================================
-# SECTION 6 — Service user & directory structure
+# SECTION 7 — Service user & directory structure
 # =============================================================================
 
 setup_user_and_dirs() {
@@ -192,7 +211,7 @@ setup_user_and_dirs() {
 setup_user_and_dirs
 
 # =============================================================================
-# SECTION 7 — Download & extract OpenSpecimen build
+# SECTION 8 — Download & extract OpenSpecimen build
 # =============================================================================
 
 download_and_extract() {
@@ -227,7 +246,7 @@ download_and_extract() {
 download_and_extract
 
 # =============================================================================
-# SECTION 8 — Configure Tomcat
+# SECTION 9 — Configure Tomcat
 # =============================================================================
 
 configure_tomcat() {
@@ -290,7 +309,7 @@ export JDK_JAVA_OPTIONS\
 configure_tomcat
 
 # =============================================================================
-# SECTION 9 — Configure openspecimen.properties (from ZIP)
+# SECTION 10 — Configure openspecimen.properties (from ZIP)
 # =============================================================================
 
 configure_properties() {
@@ -325,7 +344,7 @@ configure_properties() {
 configure_properties
 
 # =============================================================================
-# SECTION 10 — Run OpenSpecimen installer
+# SECTION 11 — Run OpenSpecimen installer
 # =============================================================================
 
 run_installer() {
@@ -339,7 +358,7 @@ run_installer() {
 run_installer
 
 # =============================================================================
-# SECTION 11 — Permissions
+# SECTION 12 — Permissions
 # =============================================================================
 
 set_permissions() {
@@ -354,7 +373,7 @@ set_permissions() {
 set_permissions
 
 # =============================================================================
-# SECTION 12 — systemd service
+# SECTION 13 — systemd service
 # =============================================================================
 
 create_systemd_service() {
@@ -391,7 +410,7 @@ EOF
 create_systemd_service
 
 # =============================================================================
-# SECTION 13 — Firewall (ufw)
+# SECTION 14 — Firewall (ufw)
 # =============================================================================
 
 configure_firewall() {
@@ -399,17 +418,18 @@ configure_firewall() {
     command -v ufw &>/dev/null || apt-get install -y -qq ufw
 
     ufw allow OpenSSH
+    ufw allow "${APACHE_PORT}/tcp"  comment "Apache HTTP"
     ufw allow "${TOMCAT_PORT}/tcp" comment "OpenSpecimen HTTP"
     ufw allow "8000/tcp"           comment "OpenSpecimen JDWP debug"
 
     ufw status | grep -q "Status: active" || ufw --force enable
-    success "Firewall configured. Ports ${TOMCAT_PORT} and 8000 open."
+    success "Firewall configured. Ports ${APACHE_PORT}, ${TOMCAT_PORT}, and 8000 open."
 }
 
 configure_firewall
 
 # =============================================================================
-# SECTION 14 — Cleanup
+# SECTION 15 — Cleanup
 # =============================================================================
 
 info "Cleaning up installer zip..."
