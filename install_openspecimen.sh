@@ -30,6 +30,16 @@ LOG_FILE="/var/log/openspecimen_install.log"
 APACHE_PORT=80
 TOMCAT_PORT=8080
 
+#─── Test input overrides (comment out after validation) ────────────────────
+USE_TEST_INPUTS="true"
+TEST_OS_DOWNLOAD_URL="https://build.openspecimen.org/download/openspecimen_v12.2.RC5.zip"
+TEST_OS_DOWNLOAD_USER="os_build_user"
+TEST_OS_DOWNLOAD_PASS="os_build_user"
+TEST_MYSQL_ROOT_PASS="Root@12345"
+TEST_OS_DB_NAME="openspecimen_test"
+TEST_OS_DB_USER="openspecimen"
+TEST_OS_DB_PASS="OpenSpecimen@12345"
+
 # ─── Redirect all output to log as well ──────────────────────────────────────
 exec > >(tee -a "$LOG_FILE") 2>&1
 
@@ -47,6 +57,25 @@ echo ""
 collect_inputs() {
     info "Collecting installation parameters..."
     echo ""
+
+    if [[ "${USE_TEST_INPUTS:-false}" == "true" ]]; then
+        OS_DOWNLOAD_URL="${TEST_OS_DOWNLOAD_URL:-}"
+        OS_DOWNLOAD_USER="${TEST_OS_DOWNLOAD_USER:-}"
+        OS_DOWNLOAD_PASS="${TEST_OS_DOWNLOAD_PASS:-}"
+        MYSQL_ROOT_PASS="${TEST_MYSQL_ROOT_PASS:-}"
+        OS_DB_NAME="${TEST_OS_DB_NAME:-openspecimen}"
+        OS_DB_USER="${TEST_OS_DB_USER:-osuser}"
+        OS_DB_PASS="${TEST_OS_DB_PASS:-}"
+
+        [[ -n "$OS_DOWNLOAD_URL" ]] || die "TEST_OS_DOWNLOAD_URL cannot be empty when USE_TEST_INPUTS=true."
+        [[ -n "$OS_DOWNLOAD_USER" ]] || die "TEST_OS_DOWNLOAD_USER cannot be empty when USE_TEST_INPUTS=true."
+        [[ -n "$OS_DOWNLOAD_PASS" ]] || die "TEST_OS_DOWNLOAD_PASS cannot be empty when USE_TEST_INPUTS=true."
+        [[ -n "$MYSQL_ROOT_PASS" ]] || die "TEST_MYSQL_ROOT_PASS cannot be empty when USE_TEST_INPUTS=true."
+        [[ -n "$OS_DB_PASS" ]] || die "TEST_OS_DB_PASS cannot be empty when USE_TEST_INPUTS=true."
+
+        success "Using hardcoded test inputs."
+        return
+    fi
 
     read -rp  "  OpenSpecimen download URL          : " OS_DOWNLOAD_URL
     [[ -n "$OS_DOWNLOAD_URL" ]] || die "Download URL cannot be empty."
@@ -232,7 +261,8 @@ download_and_extract() {
     local zip_file="${INSTALLER_DIR}/openspecimen.zip"
 
     info "Downloading OpenSpecimen Enterprise build..."
-    curl -fsSL \
+    info "Download progress will show percentage, transfer speed, and ETA."
+    curl -fL --progress-bar \
         --user "${OS_DOWNLOAD_USER}:${OS_DOWNLOAD_PASS}" \
         -o "$zip_file" \
         "$OS_DOWNLOAD_URL" \
