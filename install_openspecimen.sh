@@ -445,35 +445,32 @@ configure_properties() {
 configure_properties
 
 # =============================================================================
-# SECTION 12 — Run OpenSpecimen installer
-# =============================================================================
-
-run_installer() {
-    info "Running OpenSpecimen install.sh..."
-    cd "$OSPM_HOME"
-    chmod +x install.sh
-    bash install.sh "${OSPM_HOME}/openspecimen.properties"
-    success "OpenSpecimen installer completed."
-}
-
-run_installer
-
-# =============================================================================
-# SECTION 13 — Permissions
+# SECTION 12 — Permissions
 # =============================================================================
 
 set_permissions() {
     info "Setting ownership and permissions..."
     mkdir -p "${TOMCAT_DIR}/logs"
     chown -R "${OS_USER}:${OS_USER}" "$BASE_DIR"
-    chmod -R 750 "$TOMCAT_DIR"
-    chmod 750 "${TOMCAT_DIR}/logs"
-    chmod -R 770 "$DATA_DIR" "$PLUGINS_DIR"
+    chmod -R 770 "$BASE_DIR"
     find "${TOMCAT_DIR}/bin" -name "*.sh" -exec chmod +x {} \;
     success "Permissions set."
 }
 
 set_permissions
+
+# =============================================================================
+# SECTION 13 — Run OpenSpecimen installer
+# =============================================================================
+
+run_installer() {
+    info "Running OpenSpecimen install.sh as '${OS_USER}'..."
+    chmod +x "${OSPM_HOME}/install.sh"
+    runuser -u "${OS_USER}" -- bash -c "cd '${OSPM_HOME}' && bash install.sh '${OSPM_HOME}/openspecimen.properties'"
+    success "OpenSpecimen installer completed."
+}
+
+run_installer
 
 # =============================================================================
 # SECTION 14 — systemd service
