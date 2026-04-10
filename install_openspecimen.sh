@@ -29,6 +29,8 @@ INSTALLER_DIR="${BASE_DIR}/installer"
 LOG_FILE="/var/log/openspecimen_install.log"
 APACHE_PORT=80
 TOMCAT_PORT=8080
+AJP_PORT=8009
+AJP_SECRET="changeit"
 
 #─── Test input overrides (comment out after validation) ────────────────────
 USE_TEST_INPUTS="true"
@@ -347,6 +349,30 @@ export JDK_JAVA_OPTIONS\
 ' "$catalina"
     fi
 
+    info "Patching server.xml for AJP proxy..."
+    local server_xml="${TOMCAT_DIR}/conf/server.xml"
+    cp -f "$server_xml" "${server_xml}.bak"
+
+    python3 - <<PYEOF
+from pathlib import Path
+import re
+
+path = Path("${server_xml}")
+content = path.read_text()
+connector = """    <Connector protocol="AJP/1.3" secret="${AJP_SECRET}"
+               address="127.0.0.1"
+               port="${AJP_PORT}"
+               redirectPort="8443" />"""
+
+pattern = re.compile(r'^[ \t]*<Connector\s+protocol="AJP/1\\.3"[\\s\\S]*?/>[ \t]*$', re.M)
+if pattern.search(content):
+    content = pattern.sub(connector, content, count=1)
+elif connector not in content:
+    content = content.replace("</Service>", connector + "\\n  </Service>")
+
+path.write_text(content)
+PYEOF
+
     success "Tomcat configured."
 }
 
@@ -368,7 +394,7 @@ configure_apache() {
     ServerName localhost
 
     ProxyPreserveHost On
-    ProxyPass / ajp://localhost:8009/openspecimen/
+    ProxyPass / ajp://localhost:8009/openspecimen/ secret=changeit
     ProxyPassReverse / ajp://localhost:8009/openspecimen/
     ProxyPassReverseCookiePath /openspecimen /
 </VirtualHost>
@@ -438,8 +464,10 @@ run_installer
 
 set_permissions() {
     info "Setting ownership and permissions..."
+    mkdir -p "${TOMCAT_DIR}/logs"
     chown -R "${OS_USER}:${OS_USER}" "$BASE_DIR"
     chmod -R 750 "$TOMCAT_DIR"
+    chmod 750 "${TOMCAT_DIR}/logs"
     chmod -R 770 "$DATA_DIR" "$PLUGINS_DIR"
     find "${TOMCAT_DIR}/bin" -name "*.sh" -exec chmod +x {} \;
     success "Permissions set."
