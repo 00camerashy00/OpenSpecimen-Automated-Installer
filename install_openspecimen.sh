@@ -135,23 +135,26 @@ install_java
 # =============================================================================
 
 install_mysql() {
+    local mysql_fresh_install=0
+    local mysql_datadir="/var/lib/mysql"
+    local os_mysql_cnf="/etc/mysql/mysql.conf.d/99-openspecimen.cnf"
+
     if ! systemctl is-active --quiet mysql 2>/dev/null; then
         info "Installing MySQL 8.0..."
         debconf-set-selections <<< "mysql-server mysql-server/root_password password ${MYSQL_ROOT_PASS}"
         debconf-set-selections <<< "mysql-server mysql-server/root_password_again password ${MYSQL_ROOT_PASS}"
         apt-get install -y -qq mysql-server
         systemctl enable mysql
-        systemctl start mysql
-        success "MySQL 8.0 installed and started."
+        mysql_fresh_install=1
+        success "MySQL 8.0 installed."
     else
         success "MySQL already running — skipping install."
     fi
 
-    MYCNF="/etc/mysql/mysql.conf.d/mysqld.cnf"
-    if ! grep -q "openspecimen_config" "$MYCNF" 2>/dev/null; then
-        info "Applying MySQL prerequisites..."
-        cat >> "$MYCNF" <<'EOF'
+    info "Applying MySQL prerequisites..."
+    systemctl stop mysql 2>/dev/null || true
 
+    cat > "$os_mysql_cnf" <<'EOF'
 # --- OpenSpecimen required settings --- openspecimen_config
 [client]
 default-character-set=utf8
@@ -162,15 +165,26 @@ lower_case_table_names=1
 innodb_buffer_pool_size=1536M
 log_bin_trust_function_creators=1
 optimizer_search_depth=0
-init_connect='SET collation_connection = utf8_unicode_ci'
-init_connect='SET NAMES utf8'
+init_connect='SET NAMES utf8 COLLATE utf8_unicode_ci'
 collation-server=utf8_unicode_ci
 EOF
-        systemctl restart mysql
-        success "MySQL prerequisites applied."
-    else
-        info "MySQL prerequisites already configured — skipping."
+
+    if [[ $mysql_fresh_install -eq 1 ]]; then
+        info "Reinitializing MySQL data directory with lower_case_table_names=1..."
+        find "$mysql_datadir" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
+        mysqld --defaults-file=/etc/mysql/my.cnf --initialize-insecure --user=mysql --console
     fi
+
+    systemctl start mysql
+
+    if [[ $mysql_fresh_install -eq 1 ]]; then
+        mysql --protocol=socket -uroot <<SQL
+ALTER USER 'root'@'localhost' IDENTIFIED BY '${MYSQL_ROOT_PASS}';
+FLUSH PRIVILEGES;
+SQL
+    fi
+
+    success "MySQL prerequisites applied."
 }
 
 install_mysql
