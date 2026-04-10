@@ -186,16 +186,16 @@ install_mysql() {
     cat > "$os_mysql_cnf" <<'EOF'
 # --- OpenSpecimen required settings --- openspecimen_config
 [client]
-default-character-set=utf8
+default-character-set=utf8mb4
 
 [mysqld]
-character-set-server=utf8
+character-set-server=utf8mb4
 lower_case_table_names=1
-innodb_buffer_pool_size=1536M
+innodb_buffer_pool_size=2048M
 log_bin_trust_function_creators=1
 optimizer_search_depth=0
-init_connect='SET NAMES utf8 COLLATE utf8_unicode_ci'
-collation-server=utf8_unicode_ci
+init_connect='SET collation_connection = utf8mb4_unicode_ci'
+collation-server=utf8mb4_unicode_ci
 EOF
 
     if [[ $mysql_fresh_install -eq 1 ]]; then
@@ -353,7 +353,38 @@ export JDK_JAVA_OPTIONS\
 configure_tomcat
 
 # =============================================================================
-# SECTION 10 — Configure openspecimen.properties (from ZIP)
+# SECTION 10 — Configure Apache
+# =============================================================================
+
+configure_apache() {
+    local apache_site="/etc/apache2/sites-available/000-default.conf"
+
+    info "Configuring Apache reverse proxy..."
+
+    a2enmod proxy proxy_ajp >/dev/null
+
+    cat > "$apache_site" <<'EOF'
+<VirtualHost *:80>
+    ServerName localhost
+
+    ProxyPreserveHost On
+    ProxyPass / ajp://localhost:8009/openspecimen/
+    ProxyPassReverse / ajp://localhost:8009/openspecimen/
+    ProxyPassReverseCookiePath /openspecimen /
+</VirtualHost>
+EOF
+
+    a2dissite 000-default >/dev/null 2>&1 || true
+    a2ensite 000-default >/dev/null
+    systemctl reload apache2
+
+    success "Apache reverse proxy configured."
+}
+
+configure_apache
+
+# =============================================================================
+# SECTION 11 — Configure openspecimen.properties (from ZIP)
 # =============================================================================
 
 configure_properties() {
@@ -388,7 +419,7 @@ configure_properties() {
 configure_properties
 
 # =============================================================================
-# SECTION 11 — Run OpenSpecimen installer
+# SECTION 12 — Run OpenSpecimen installer
 # =============================================================================
 
 run_installer() {
@@ -402,7 +433,7 @@ run_installer() {
 run_installer
 
 # =============================================================================
-# SECTION 12 — Permissions
+# SECTION 13 — Permissions
 # =============================================================================
 
 set_permissions() {
@@ -417,7 +448,7 @@ set_permissions() {
 set_permissions
 
 # =============================================================================
-# SECTION 13 — systemd service
+# SECTION 14 — systemd service
 # =============================================================================
 
 create_systemd_service() {
@@ -454,7 +485,7 @@ EOF
 create_systemd_service
 
 # =============================================================================
-# SECTION 14 — Firewall (ufw)
+# SECTION 15 — Firewall (ufw)
 # =============================================================================
 
 configure_firewall() {
@@ -473,7 +504,7 @@ configure_firewall() {
 configure_firewall
 
 # =============================================================================
-# SECTION 15 — Cleanup
+# SECTION 16 — Cleanup
 # =============================================================================
 
 info "Cleaning up installer zip..."
