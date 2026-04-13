@@ -514,6 +514,7 @@ Requires=mysql.service
 
 [Service]
 Type=forking
+PIDFile=/usr/local/openspecimen/tomcat-as/bin/pid.txt
 User=${OS_USER}
 Group=${OS_USER}
 Environment="JAVA_HOME=${JAVA_HOME}"
@@ -521,6 +522,8 @@ Environment="CATALINA_HOME=${TOMCAT_DIR}"
 Environment="CATALINA_PID=${TOMCAT_DIR}/bin/pid.txt"
 ExecStart=${TOMCAT_DIR}/bin/startup.sh
 ExecStop=${TOMCAT_DIR}/bin/shutdown.sh -force
+KillMode=control-group
+TimeoutStopSec=30
 SuccessExitStatus=143
 Restart=on-failure
 RestartSec=10
