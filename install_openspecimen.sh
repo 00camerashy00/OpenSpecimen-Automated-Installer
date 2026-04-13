@@ -31,6 +31,8 @@ APACHE_PORT=80
 TOMCAT_PORT=8080
 AJP_PORT=8009
 AJP_SECRET="changeit"
+ENABLE_JDWP_DEBUG="false"
+JDWP_PORT=8000
 
 #─── Test input overrides (comment out after validation) ────────────────────
 USE_TEST_INPUTS="true"
@@ -347,9 +349,14 @@ PYEOF
 
     # ── setenv.sh ────────────────────────────────────────────────────────────
     info "Writing setenv.sh..."
+    local catalina_opts="-XX:+HeapDumpOnOutOfMemoryError -XX:HeapDumpPath=${TOMCAT_DIR}/bin"
+    if [[ "$ENABLE_JDWP_DEBUG" == "true" ]]; then
+        catalina_opts="${catalina_opts} -agentlib:jdwp=transport=dt_socket,address=*:${JDWP_PORT},server=y,suspend=n"
+    fi
+
     cat > "${TOMCAT_DIR}/bin/setenv.sh" <<EOF
-export JAVA_OPTS="-Dfile.encoding=UTF-8 -Xms128m -Xmx2048m"
-export CATALINA_OPTS="\$CATALINA_OPTS -XX:+HeapDumpOnOutOfMemoryError -XX:HeapDumpPath=${TOMCAT_DIR}/bin -agentlib:jdwp=transport=dt_socket,address=*:8000,server=y,suspend=n"
+export JAVA_OPTS="-Dfile.encoding=UTF-8 -Xms128m -Xmx2048m --add-opens=java.base/java.lang=ALL-UNNAMED --add-opens=java.base/java.io=ALL-UNNAMED --add-opens=java.base/java.util=ALL-UNNAMED --add-opens=java.base/java.util.concurrent=ALL-UNNAMED --add-opens=java.rmi/sun.rmi.transport=ALL-UNNAMED --add-opens=java.base/java.net=ALL-UNNAMED"
+export CATALINA_OPTS="\$CATALINA_OPTS ${catalina_opts}"
 CATALINA_PID=${TOMCAT_DIR}/bin/pid.txt
 EOF
     chmod +x "${TOMCAT_DIR}/bin/setenv.sh"
@@ -374,7 +381,7 @@ export JDK_JAVA_OPTIONS\
     local server_xml="${TOMCAT_DIR}/conf/server.xml"
     cp -f "$server_xml" "${server_xml}.bak"
 
-    python3 - <<PYEOF
+python3 - <<PYEOF
 from pathlib import Path
 import re
 
@@ -385,7 +392,7 @@ connector = """    <Connector protocol="AJP/1.3" secret="${AJP_SECRET}"
                port="${AJP_PORT}"
                redirectPort="8443" />"""
 
-pattern = re.compile(r'^[ \t]*<Connector\s+protocol="AJP/1\\.3"[\\s\\S]*?/>[ \t]*$', re.M)
+pattern = re.compile(r'^[ \t]*<Connector\\b(?=[^>]*\\bprotocol="AJP/1\\.3")[\\s\\S]*?(?:/>|</Connector>)[ \t]*$', re.M)
 if pattern.search(content):
     content = pattern.sub(connector, content, count=1)
 elif connector not in content:
@@ -541,10 +548,12 @@ configure_firewall() {
     ufw allow OpenSSH
     ufw allow "${APACHE_PORT}/tcp"  comment "Apache HTTP"
     ufw allow "${TOMCAT_PORT}/tcp" comment "OpenSpecimen HTTP"
-    ufw allow "8000/tcp"           comment "OpenSpecimen JDWP debug"
+    if [[ "$ENABLE_JDWP_DEBUG" == "true" ]]; then
+        ufw allow "${JDWP_PORT}/tcp" comment "OpenSpecimen JDWP debug"
+    fi
 
     ufw status | grep -q "Status: active" || ufw --force enable
-    success "Firewall configured. Ports ${APACHE_PORT}, ${TOMCAT_PORT}, and 8000 open."
+    success "Firewall configured. Ports ${APACHE_PORT} and ${TOMCAT_PORT} open."
 }
 
 configure_firewall
