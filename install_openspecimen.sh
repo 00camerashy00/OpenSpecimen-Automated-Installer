@@ -301,27 +301,48 @@ configure_tomcat() {
     local context_xml="${TOMCAT_DIR}/conf/context.xml"
     cp -f "$context_xml" "${context_xml}.bak"
 
-    python3 - <<PYEOF
-with open("${context_xml}", "r") as f:
-    content = f.read()
+    CONTEXT_XML="$context_xml" \
+    OS_DB_USER="$OS_DB_USER" \
+    OS_DB_PASS="$OS_DB_PASS" \
+    OS_DB_NAME="$OS_DB_NAME" \
+    TOMCAT_DIR="$TOMCAT_DIR" \
+    python3 - <<'PYEOF'
+from html import escape
+import os
+from pathlib import Path
+import re
 
-if "jdbc/openspecimen" not in content:
-    inject = """
+path = Path(os.environ["CONTEXT_XML"])
+content = path.read_text()
+
+content = re.sub(
+    r'\n?[ \t]*<Resource\b(?=[^>]*\bname=["\']jdbc/openspecimen["\'])[\s\S]*?/>[ \t]*\n?',
+    "\n",
+    content,
+    flags=re.IGNORECASE,
+)
+content = re.sub(
+    r'\n?[ \t]*<Environment\b(?=[^>]*\bname=["\']config/openspecimen["\'])[\s\S]*?/>[ \t]*\n?',
+    "\n",
+    content,
+    flags=re.IGNORECASE,
+)
+
+inject = f"""
     <Resource name="jdbc/openspecimen" auth="Container" type="javax.sql.DataSource"
         maxActive="100" maxIdle="30" maxWait="10000"
-        username="${OS_DB_USER}" password="${OS_DB_PASS}"
+        username="{escape(os.environ["OS_DB_USER"], quote=True)}" password="{escape(os.environ["OS_DB_PASS"], quote=True)}"
         driverClassName="com.mysql.cj.jdbc.Driver"
-        url="jdbc:mysql://localhost:3306/${OS_DB_NAME}?useSSL=false&amp;allowPublicKeyRetrieval=true&amp;serverTimezone=UTC"
+        url="jdbc:mysql://localhost:3306/{escape(os.environ["OS_DB_NAME"], quote=True)}?useSSL=false&amp;allowPublicKeyRetrieval=true&amp;serverTimezone=UTC"
         testOnBorrow="true" validationQuery="select 1" />
 
     <Environment
         name="config/openspecimen"
-        value="${TOMCAT_DIR}/conf/openspecimen.properties"
+        value="{escape(os.environ["TOMCAT_DIR"], quote=True)}/conf/openspecimen.properties"
         type="java.lang.String"/>
 """
-    content = content.replace("</Context>", inject + "\n</Context>")
-    with open("${context_xml}", "w") as f:
-        f.write(content)
+content = content.replace("</Context>", inject + "\n</Context>")
+path.write_text(content)
 PYEOF
 
     # ── setenv.sh ────────────────────────────────────────────────────────────
